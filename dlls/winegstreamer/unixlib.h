@@ -63,6 +63,7 @@ struct wg_format
                 WG_VIDEO_FORMAT_YVYU,
 
                 WG_VIDEO_FORMAT_CINEPAK,
+                WG_VIDEO_FORMAT_MPEG1,
             } format;
             int32_t width, height;
             uint32_t fps_n, fps_d;
@@ -118,6 +119,7 @@ enum wg_parser_type
     WG_PARSER_AVIDEMUX,
     WG_PARSER_MPEGAUDIOPARSE,
     WG_PARSER_WAVPARSE,
+    WG_PARSER_MPEGDEMUX,
 };
 
 struct wg_parser_create_params

@@ -24,14 +24,60 @@
 #include "wine/strmbase.h"
 #include "wine/test.h"
 
+static const GUID CLSID_decodebin_parser = {0xf9d8d64e, 0xa144, 0x47dc, {0x8e, 0xe0, 0xf5, 0x34, 0x98, 0x37, 0x2c, 0x29}};
 static const GUID testguid = {0xfacade};
 static const GUID MEDIASUBTYPE_mp3 = {0x00000055,0x0000,0x0010,{0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71}};
+
+static IBaseFilter *create_decodebin_parser(void)
+{
+    IBaseFilter *filter = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_decodebin_parser, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IBaseFilter, (void **)&filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    return filter;
+}
 
 static IBaseFilter *create_mpeg_splitter(void)
 {
     IBaseFilter *filter = NULL;
     HRESULT hr = CoCreateInstance(&CLSID_MPEG1Splitter, NULL, CLSCTX_INPROC_SERVER,
             &IID_IBaseFilter, (void **)&filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    return filter;
+}
+
+static IBaseFilter *create_mpeg_video_decoder(void)
+{
+    IBaseFilter *filter = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_CMpegVideoCodec, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IBaseFilter, (void **) &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    return filter;
+}
+
+static IBaseFilter *create_mpeg_audio_decoder(void)
+{
+    IBaseFilter *filter = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_CMpegAudioCodec, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IBaseFilter, (void **) &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    return filter;
+}
+
+static IBaseFilter *create_video_renderer(void)
+{
+    IBaseFilter *filter = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_VideoRendererDefault, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IBaseFilter, (void **) &filter);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    return filter;
+}
+
+static IBaseFilter *create_audio_renderer(void)
+{
+    IBaseFilter *filter = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_AudioRender, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IBaseFilter, (void **) &filter);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     return filter;
 }
@@ -103,6 +149,50 @@ static IFilterGraph2 *connect_input(IBaseFilter *splitter, const WCHAR *filename
     IBaseFilter_Release(reader);
     IFileSourceFilter_Release(filesource);
     return graph;
+}
+
+static void connect_video_renderer(IFilterGraph2 *graph, IPin* source)
+{
+    IBaseFilter *renderer = create_video_renderer();
+    IEnumPins *enumPins;
+    IPin *rendererPin;
+    ULONG count;
+    HRESULT hr;
+
+    hr = IBaseFilter_EnumPins(renderer, &enumPins);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumPins_Next(enumPins, 1, &rendererPin, &count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 1, "Got count %u.\n", count);
+
+    hr = IFilterGraph2_ConnectDirect(graph, source, rendererPin, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IPin_Release(source);
+    IPin_Release(rendererPin);
+}
+
+static void connect_audio_renderer(IFilterGraph2 *graph, IPin* source)
+{
+    IBaseFilter *renderer = create_audio_renderer();
+    IEnumPins *enumPins;
+    IPin *rendererPin;
+    ULONG count;
+    HRESULT hr;
+
+    hr = IBaseFilter_EnumPins(renderer, &enumPins);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IEnumPins_Next(enumPins, 1, &rendererPin, &count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 1, "Got count %u.\n", count);
+
+    hr = IFilterGraph2_ConnectDirect(graph, source, rendererPin, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IPin_Release(source);
+    IPin_Release(rendererPin);
 }
 
 #define check_interface(a, b, c) check_interface_(__LINE__, a, b, c)
@@ -273,7 +363,7 @@ static void test_aggregation(void)
 
 static void test_enum_pins(void)
 {
-    const WCHAR *filename = load_resource(L"test.mp3");
+    const WCHAR *filename = load_resource(L"test.mpg");
     IBaseFilter *filter = create_mpeg_splitter();
     IEnumPins *enum1, *enum2;
     IFilterGraph2 *graph;
@@ -369,6 +459,10 @@ static void test_enum_pins(void)
     IPin_Release(pins[0]);
 
     hr = IEnumPins_Next(enum1, 1, pins, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    IPin_Release(pins[0]);
+
+    hr = IEnumPins_Next(enum1, 1, pins, NULL);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
 
     hr = IEnumPins_Reset(enum1);
@@ -384,10 +478,11 @@ static void test_enum_pins(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IEnumPins_Next(enum1, 3, pins, &count);
-    ok(hr == S_FALSE, "Got hr %#x.\n", hr);
-    ok(count == 2, "Got count %u.\n", count);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(count == 3, "Got count %u.\n", count);
     IPin_Release(pins[0]);
     IPin_Release(pins[1]);
+    IPin_Release(pins[2]);
 
     IEnumPins_Release(enum1);
     IFilterGraph2_Release(graph);
@@ -399,7 +494,7 @@ static void test_enum_pins(void)
 
 static void test_find_pin(void)
 {
-    const WCHAR *filename = load_resource(L"test.mp3");
+    const WCHAR *filename = load_resource(L"test.mpg");
     IBaseFilter *filter = create_mpeg_splitter();
     IFilterGraph2 *graph;
     IEnumPins *enum_pins;
@@ -417,6 +512,8 @@ static void test_find_pin(void)
 
     hr = IBaseFilter_FindPin(filter, L"Audio", &pin);
     ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
+    hr = IBaseFilter_FindPin(filter, L"Video", &pin);
+    ok(hr == VFW_E_NOT_FOUND, "Got hr %#x.\n", hr);
 
     graph = connect_input(filter, filename);
 
@@ -427,6 +524,15 @@ static void test_find_pin(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IBaseFilter_FindPin(filter, L"Input", &pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(pin == pin2, "Expected pin %p, got %p.\n", pin2, pin);
+    IPin_Release(pin);
+    IPin_Release(pin2);
+
+    hr = IEnumPins_Next(enum_pins, 1, &pin2, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_FindPin(filter, L"Video", &pin);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(pin == pin2, "Expected pin %p, got %p.\n", pin2, pin);
     IPin_Release(pin);
@@ -451,7 +557,7 @@ static void test_find_pin(void)
 
 static void test_pin_info(void)
 {
-    const WCHAR *filename = load_resource(L"test.mp3");
+    const WCHAR *filename = load_resource(L"test.mpg");
     IBaseFilter *filter = create_mpeg_splitter();
     ULONG ref, expect_ref;
     IFilterGraph2 *graph;
@@ -609,7 +715,7 @@ static void test_media_types(void)
     todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
     mt.subtype = MEDIASUBTYPE_MPEG1System;
     hr = IPin_QueryAccept(pin, &mt);
-    todo_wine ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
     mt.subtype = MEDIASUBTYPE_MPEG1AudioPayload;
     hr = IPin_QueryAccept(pin, &mt);
     ok(hr == S_FALSE, "Got hr %#x.\n", hr);
@@ -666,7 +772,8 @@ static void test_media_types(void)
     IEnumMediaTypes_Release(enummt);
     IPin_Release(pin);
 
-    IBaseFilter_FindPin(filter, L"Audio", &pin);
+    hr = IBaseFilter_FindPin(filter, L"Audio", &pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 
     hr = IPin_EnumMediaTypes(pin, &enummt);
     ok(hr == S_OK, "Got hr %#x.\n", hr);
@@ -675,7 +782,7 @@ static void test_media_types(void)
     ok(hr == S_OK, "Got hr %#x.\n", hr);
     ok(IsEqualGUID(&pmt->majortype, &MEDIATYPE_Audio), "Got major type %s.\n",
             wine_dbgstr_guid(&pmt->majortype));
-    todo_wine ok(IsEqualGUID(&pmt->subtype, &MEDIASUBTYPE_MPEG1AudioPayload), "Got subtype %s.\n",
+    ok(IsEqualGUID(&pmt->subtype, &MEDIASUBTYPE_MPEG1AudioPayload), "Got subtype %s.\n",
             wine_dbgstr_guid(&pmt->subtype));
     todo_wine ok(pmt->bFixedSizeSamples == TRUE, "Got fixed size %d.\n", pmt->bFixedSizeSamples);
     ok(!pmt->bTemporalCompression, "Got temporal compression %d.\n", pmt->bTemporalCompression);
@@ -1962,6 +2069,109 @@ static void test_large_file(void)
     ok(ret, "Failed to delete file, error %u.\n", GetLastError());
 }
 
+static void test_decodebin(void)
+{
+    const WCHAR *filename = load_resource(L"test.mpg");
+    IBaseFilter *parser = create_decodebin_parser();
+    IFileSourceFilter *filesource;
+    IFilterGraph2 *graph;
+    IBaseFilter *reader;
+    IPin *source, *sink, *decodebinVideoSource;
+    HRESULT hr;
+
+    CoCreateInstance(&CLSID_AsyncReader, NULL, CLSCTX_INPROC_SERVER,
+                     &IID_IBaseFilter, (void **)&reader);
+    IBaseFilter_QueryInterface(reader, &IID_IFileSourceFilter, (void **)&filesource);
+    IFileSourceFilter_Load(filesource, filename, NULL);
+
+    CoCreateInstance(&CLSID_FilterGraph, NULL, CLSCTX_INPROC_SERVER,
+                     &IID_IFilterGraph2, (void **)&graph);
+    IFilterGraph2_AddFilter(graph, reader, NULL);
+    IFilterGraph2_AddFilter(graph, parser, NULL);
+
+    IBaseFilter_FindPin(parser, L"input pin", &sink);
+    IBaseFilter_FindPin(reader, L"Output", &source);
+
+    hr = IFilterGraph2_ConnectDirect(graph, source, sink, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    IPin_Release(source);
+    IPin_Release(sink);
+    IBaseFilter_Release(reader);
+    IFileSourceFilter_Release(filesource);
+
+    hr = IBaseFilter_FindPin(parser, L"Stream 00", &decodebinVideoSource);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    // [decodebin parser] (Stream 00) --> [Video Renderer]
+    connect_video_renderer(graph, decodebinVideoSource);
+}
+
+static void test_mpeg(void)
+{
+    const WCHAR *filename = load_resource(L"test.mpg");
+    IBaseFilter *splitter = create_mpeg_splitter();
+    IPin *videoSource, *audioSource, *videoSink, *audioSink;
+    IPin *videoDecoderSource, *audioDecoderSource;
+    // [FileSource] --> [MPEG-I Stream Splitter]
+    IFilterGraph2 *graph = connect_input(splitter, filename);
+    IBaseFilter *videoDecoder = create_mpeg_video_decoder();
+    IBaseFilter *audioDecoder = create_mpeg_audio_decoder();
+    HRESULT hr;
+
+    // --- video
+    hr = IBaseFilter_FindPin(splitter, L"Video", &videoSource);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_FindPin(videoDecoder, L"Input", &videoSink);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    // [MPEG-I Stream Splitter] (Video) --> [MPEG Video Decoder]
+    hr = IFilterGraph2_ConnectDirect(graph, videoSource, videoSink, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_FindPin(videoDecoder, L"Output", &videoDecoderSource);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    // [MPEG Video Decoder] --> [Video Renderer]
+    connect_video_renderer(graph, videoDecoderSource);
+
+    // --- audio
+    hr = IBaseFilter_FindPin(splitter, L"Audio", &audioSource);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_FindPin(audioDecoder, L"XForm In", &audioSink);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    // [MPEG-I Stream Splitter] (Audio) --> [MPEG Audio Decoder]
+    hr = IFilterGraph2_ConnectDirect(graph, audioSource, audioSink, NULL);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IBaseFilter_FindPin(audioDecoder, L"XForm Out", &audioDecoderSource);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    // [MPEG Audio Decoder] --> [Audio Renderer]
+    connect_audio_renderer(graph, audioDecoderSource);
+}
+
+static void test_mpeg_audio_decoder(void)
+{
+    IPin *pin;
+    IBaseFilter *filter = create_mpeg_audio_decoder();
+    HRESULT hr;
+
+    IBaseFilter_FindPin(filter, L"XForm Out", &pin);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    todo_wine check_interface(pin, &IID_IMediaPosition, TRUE);
+    check_interface(pin, &IID_IMediaSeeking, TRUE);
+    check_interface(pin, &IID_IPin, TRUE);
+    check_interface(pin, &IID_IQualityControl, TRUE);
+    check_interface(pin, &IID_IUnknown, TRUE);
+
+    IPin_Release(pin);
+}
+
 START_TEST(mpegsplit)
 {
     IBaseFilter *filter;
@@ -1988,6 +2198,9 @@ START_TEST(mpegsplit)
     test_seeking();
     test_streaming();
     test_large_file();
+    test_mpeg();
+    test_decodebin();
+    test_mpeg_audio_decoder();
 
     CoUninitialize();
 }

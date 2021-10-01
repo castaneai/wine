@@ -280,6 +280,7 @@ unsigned int wg_format_get_max_size(const struct wg_format *format)
                      * but as long as every sample fits into our allocator, we're fine. */
                     return width * height * 3;
 
+                case WG_VIDEO_FORMAT_MPEG1:
                 case WG_VIDEO_FORMAT_UNKNOWN:
                     FIXME("Cannot guess maximum sample size for unknown video format.\n");
                     return 0;
@@ -1833,8 +1834,9 @@ static HRESULT mpeg_splitter_sink_query_accept(struct strmbase_pin *iface, const
         return S_FALSE;
     if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Audio))
         return S_OK;
+    if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1System))
+        return S_OK;
     if (IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1Video)
-            || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1System)
             || IsEqualGUID(&mt->subtype, &MEDIASUBTYPE_MPEG1VideoCD))
         FIXME("Unsupported subtype %s.\n", wine_dbgstr_guid(&mt->subtype));
     return S_FALSE;
@@ -1850,9 +1852,31 @@ static const struct strmbase_sink_ops mpeg_splitter_sink_ops =
 static BOOL mpeg_splitter_filter_init_gst(struct parser *filter)
 {
     struct wg_parser *parser = filter->wg_parser;
+    struct wg_parser_stream *stream;
+    struct wg_format format;
+    uint32_t i, stream_count;
 
-    if (!create_pin(filter, wg_parser_get_stream(parser, 0), L"Audio"))
-        return FALSE;
+    stream_count = wg_parser_get_stream_count(parser);
+    for (i = 0; i < stream_count; ++i)
+    {
+        stream = wg_parser_get_stream(parser, i);
+        wg_parser_stream_get_preferred_format(stream, &format);
+        switch (format.major_type)
+        {
+            case WG_MAJOR_TYPE_AUDIO:
+                if (!create_pin(filter, stream, L"Audio"))
+                    return FALSE;
+                break;
+
+            case WG_MAJOR_TYPE_VIDEO:
+                if (!create_pin(filter, stream, L"Video"))
+                    return FALSE;
+                break;
+
+            case WG_MAJOR_TYPE_UNKNOWN:
+                break;
+        }
+    }
 
     return TRUE;
 }
@@ -1876,7 +1900,7 @@ static HRESULT mpeg_splitter_source_get_media_type(struct parser_source *pin,
 {
     struct wg_format format;
 
-    if (index > 0)
+    if (index > 1)
         return VFW_S_NO_MORE_ITEMS;
     wg_parser_stream_get_preferred_format(pin->wg_stream, &format);
     if (!amt_from_wg_format(mt, &format, false))
@@ -1917,7 +1941,7 @@ HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out)
     if (!(object = calloc(1, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (!(object->wg_parser = wg_parser_create(WG_PARSER_MPEGAUDIOPARSE, false)))
+    if (!(object->wg_parser = wg_parser_create(WG_PARSER_MPEGDEMUX, false)))
     {
         free(object);
         return E_OUTOFMEMORY;
@@ -1936,3 +1960,4 @@ HRESULT mpeg_splitter_create(IUnknown *outer, IUnknown **out)
     *out = &object->filter.IUnknown_inner;
     return S_OK;
 }
+
