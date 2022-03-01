@@ -27,10 +27,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
+// output pin
 struct mpeg_splitter_source
 {
+    bool is_video;
     struct strmbase_source pin;
-    struct wg_transform *wg_transform;
+    IQualityControl IQualityControl_iface;
     SourceSeeking seek;
 };
 
@@ -44,7 +46,6 @@ struct mpeg_splitter
 
     struct mpeg_splitter_source **sources;
     unsigned int source_count;
-
 };
 
 #pragma region filter
@@ -172,6 +173,141 @@ static const struct strmbase_filter_ops mpeg_splitter_ops =
 
 #pragma endregion
 
+#pragma region source (output pin)
+
+static inline struct mpeg_splitter_source *impl_source_from_IPin(IPin *iface)
+{
+    return CONTAINING_RECORD(iface, struct mpeg_splitter_source, pin.pin.IPin_iface);
+}
+
+static HRESULT mpeg_splitter_source_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct mpeg_splitter_source *pin = impl_source_from_IPin(&iface->IPin_iface);
+
+    if (IsEqualGUID(iid, &IID_IMediaSeeking))
+        *out = &pin->seek.IMediaSeeking_iface;
+    else if (IsEqualGUID(iid, &IID_IQualityControl))
+        *out = &pin->IQualityControl_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown *)*out);
+    return S_OK;
+}
+
+static HRESULT mpeg_splitter_source_query_accept(struct strmbase_pin *pin, const AM_MEDIA_TYPE *mt)
+{
+    // TODO: mock
+    return S_OK;
+}
+
+static HRESULT mpeg_splitter_source_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
+{
+    struct mpeg_splitter_source *pin = impl_source_from_IPin(&iface->IPin_iface);
+
+    // TODO: mock
+    memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+    if (pin->is_video)
+    {
+        // video
+        VIDEOINFO *video_format;
+        LONG width = 320, height = 240;
+        if (!(video_format = CoTaskMemAlloc(sizeof(*video_format))))
+            return E_OUTOFMEMORY;
+        memset(video_format, 0, sizeof(*video_format));
+        video_format->AvgTimePerFrame = 100;
+        video_format->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        video_format->bmiHeader.biWidth = width;
+        video_format->bmiHeader.biHeight = height;
+        video_format->rcSource.right = width;
+        video_format->rcSource.bottom = height;
+        video_format->rcTarget = video_format->rcSource;
+        video_format->bmiHeader.biPlanes = 1;
+        video_format->bmiHeader.biBitCount = 32;
+        video_format->bmiHeader.biCompression = BI_RGB;
+        video_format->bmiHeader.biSizeImage = width * height * 4;
+
+        mt->majortype = MEDIATYPE_Video;
+        mt->subtype = MEDIASUBTYPE_RGB32;
+        mt->bFixedSizeSamples = TRUE;
+        mt->lSampleSize = 1;
+        mt->formattype = FORMAT_VideoInfo;
+        mt->cbFormat = sizeof(VIDEOINFOHEADER);
+        mt->pbFormat = (BYTE *)video_format;
+        return S_OK;
+    }
+    else
+    {
+        // audio
+        WAVEFORMATEX *audio_format;
+        if (!(audio_format = CoTaskMemAlloc(sizeof(*audio_format))))
+            return E_OUTOFMEMORY;
+        memset(audio_format, 0, sizeof(*audio_format));
+
+        audio_format->wFormatTag = WAVE_FORMAT_PCM,
+        audio_format->nChannels = 1,
+        audio_format->nSamplesPerSec = 11025,
+        audio_format->wBitsPerSample = 16,
+        audio_format->nBlockAlign = 2,
+        audio_format->nAvgBytesPerSec = 2 * 11025,
+
+        mt->majortype = MEDIATYPE_Audio;
+        mt->subtype = WMMEDIASUBTYPE_PCM;
+        mt->formattype = FORMAT_WaveFormatEx;
+        mt->pUnk = NULL;
+        mt->cbFormat = sizeof(WAVEFORMATEX);
+        mt->pbFormat = (BYTE *)audio_format;
+        return S_OK;
+    }
+
+    return VFW_S_NO_MORE_ITEMS;
+}
+
+static HRESULT WINAPI mpeg_splitter_source_DecideBufferSize(struct strmbase_source *iface,
+        IMemAllocator *pAlloc, ALLOCATOR_PROPERTIES *ppropInputRequest)
+{
+    // TODO: mock
+    return S_OK;
+}
+
+static void mpeg_splitter_source_disconnect(struct strmbase_source *iface)
+{
+}
+
+static const struct strmbase_source_ops mpeg_splitter_source_ops =
+{
+    .base.pin_query_interface = mpeg_splitter_source_query_interface,
+    .base.pin_query_accept = mpeg_splitter_source_query_accept,
+    .base.pin_get_media_type = mpeg_splitter_source_get_media_type,
+    .pfnAttemptConnection = BaseOutputPinImpl_AttemptConnection,
+    .pfnDecideAllocator = BaseOutputPinImpl_DecideAllocator,
+    .pfnDecideBufferSize = mpeg_splitter_source_DecideBufferSize,
+    .source_disconnect = mpeg_splitter_source_disconnect,
+};
+
+static struct mpeg_splitter_source *create_output_pin(struct mpeg_splitter *filter,
+        const WCHAR *name, bool is_video)
+{
+    struct mpeg_splitter_source *pin, **new_array;
+
+    if (!(new_array = realloc(filter->sources, (filter->source_count + 1) * sizeof(*filter->sources))))
+        return NULL;
+    filter->sources = new_array;
+
+    if (!(pin= calloc(1, sizeof(*pin))))
+        return NULL;
+
+    pin->is_video = is_video;
+    strmbase_source_init(&pin->pin, &filter->filter, name, &mpeg_splitter_source_ops);
+
+    TRACE("------------------ create output pin: %s\n", name);
+
+    filter->sources[filter->source_count++] = pin;
+    return pin;
+}
+
+#pragma endregion
+
 #pragma region sink (input pin)
 
 static inline struct mpeg_splitter *impl_from_strmbase_sink(struct strmbase_sink *iface)
@@ -201,8 +337,8 @@ static HRESULT mpeg_splitter_sink_connect(struct strmbase_sink *iface, IPin *pee
 
     filter->sink_connected = true;
 
-    // TODO: connect wg_transorm
-    TRACE("------------ source_count: %d\n", filter->source_count);
+    create_output_pin(filter, L"Video", TRUE);
+    create_output_pin(filter, L"Audio", FALSE);
 
     for (i = 0; i < filter->source_count; ++i)
     {
@@ -213,7 +349,7 @@ static HRESULT mpeg_splitter_sink_connect(struct strmbase_sink *iface, IPin *pee
         pin->seek.llCurrent = 0;
     }
 
-    return S_OK;
+    return hr;
 }
 
 static void mpeg_splitter_sink_disconnect(struct strmbase_sink *iface)
@@ -226,38 +362,6 @@ static const struct strmbase_sink_ops mpeg_splitter_sink_ops =
     .sink_connect = mpeg_splitter_sink_connect,
     .sink_disconnect = mpeg_splitter_sink_disconnect,
 };
-
-#pragma endregion
-
-#pragma region source (output pin)
-
-static HRESULT mpeg_splitter_source_query_accept(struct mpeg_splitter_source *pin, const AM_MEDIA_TYPE *mt)
-{
-//    struct wg_format format;
-//    AM_MEDIA_TYPE pad_mt;
-//    HRESULT hr;
-//
-//    wg_parser_stream_get_preferred_format(pin->wg_stream, &format);
-//    if (!amt_from_wg_format(&pad_mt, &format, false))
-//        return E_OUTOFMEMORY;
-//    hr = compare_media_types(mt, &pad_mt) ? S_OK : S_FALSE;
-//    FreeMediaType(&pad_mt);
-//    return hr;
-    return S_OK;
-}
-
-static HRESULT mpeg_splitter_source_get_media_type(struct mpeg_splitter_source *pin,
-                                                   unsigned int index, AM_MEDIA_TYPE *mt)
-{
-//    struct wg_format format;
-//
-//    if (index > 1)
-//        return VFW_S_NO_MORE_ITEMS;
-//    wg_parser_stream_get_preferred_format(pin->wg_stream, &format);
-//    if (!amt_from_wg_format(mt, &format, false))
-//        return E_OUTOFMEMORY;
-    return S_OK;
-}
 
 #pragma endregion
 

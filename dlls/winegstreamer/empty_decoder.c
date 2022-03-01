@@ -274,47 +274,15 @@ static HRESULT empty_decoder_source_query_accept(struct strmbase_pin *iface, con
 static HRESULT empty_decoder_source_get_media_type(struct strmbase_pin *iface, unsigned int index, AM_MEDIA_TYPE *mt)
 {
     struct empty_decoder *filter = impl_from_strmbase_filter(iface->filter);
-    struct wg_format format;
 
-    amt_to_wg_format(&filter->mt, &format);
+    if (index > 0)
+    {
+        return VFW_S_NO_MORE_ITEMS;
+    }
     memset(mt, 0, sizeof(AM_MEDIA_TYPE));
+    CopyMediaType(mt, &filter->mt);
 
-    if (format.major_type == WG_MAJOR_TYPE_VIDEO)
-    {
-        static const enum wg_video_format video_formats[] =
-        {
-            /* Try to prefer YUV formats over RGB ones. Most decoders output in the
-             * YUV color space, and it's generally much less expensive for
-             * videoconvert to do YUV -> YUV transformations. */
-            WG_VIDEO_FORMAT_AYUV,
-            WG_VIDEO_FORMAT_I420,
-            WG_VIDEO_FORMAT_YV12,
-            WG_VIDEO_FORMAT_YUY2,
-            WG_VIDEO_FORMAT_UYVY,
-            WG_VIDEO_FORMAT_YVYU,
-            WG_VIDEO_FORMAT_NV12,
-            WG_VIDEO_FORMAT_BGRA,
-            WG_VIDEO_FORMAT_BGRx,
-            WG_VIDEO_FORMAT_BGR,
-            WG_VIDEO_FORMAT_RGB16,
-            WG_VIDEO_FORMAT_RGB15,
-        };
-        if (index < ARRAY_SIZE(video_formats))
-        {
-            format.u.video.format = video_formats[index];
-            if (!amt_from_wg_format(mt, &format, false))
-                return E_OUTOFMEMORY;
-            return S_OK;
-        }
-    }
-    else if (format.major_type == WG_MAJOR_TYPE_AUDIO && index == 0)
-    {
-        if (!amt_from_wg_format(mt, &format, false))
-            return E_OUTOFMEMORY;
-        return S_OK;
-    }
-
-    return VFW_S_NO_MORE_ITEMS;
+    return S_OK;
 }
 
 static HRESULT WINAPI empty_decoder_source_DecideBufferSize(struct strmbase_source *iface,

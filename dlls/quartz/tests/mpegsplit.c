@@ -2117,6 +2117,7 @@ static void test_mpeg(void)
     IFilterGraph2 *graph = connect_input(splitter, filename);
     IBaseFilter *videoDecoder = create_mpeg_video_decoder();
     IBaseFilter *audioDecoder = create_mpeg_audio_decoder();
+    IMediaControl *control;
     HRESULT hr;
 
     // --- video
@@ -2152,6 +2153,17 @@ static void test_mpeg(void)
 
     // [MPEG Audio Decoder] --> [Audio Renderer]
     connect_audio_renderer(graph, audioDecoderSource);
+
+    IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
+
+    hr = IMediaControl_Pause(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Run(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
+
+    hr = IMediaControl_Stop(control);
+    ok(hr == S_OK, "Got hr %#x.\n", hr);
 }
 
 static void test_mpeg_audio_decoder(void)
