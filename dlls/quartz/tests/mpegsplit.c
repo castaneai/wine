@@ -2118,6 +2118,7 @@ static void test_mpeg(void)
     IBaseFilter *videoDecoder = create_mpeg_video_decoder();
     IBaseFilter *audioDecoder = create_mpeg_audio_decoder();
     IMediaControl *control;
+    OAFilterState state;
     HRESULT hr;
 
     // --- video
@@ -2156,14 +2157,27 @@ static void test_mpeg(void)
 
     IFilterGraph2_QueryInterface(graph, &IID_IMediaControl, (void **)&control);
 
-    hr = IMediaControl_Pause(control);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "GetState() failed: %x\n", hr);
+    ok(state == State_Stopped, "wrong state %d\n", state);
 
     hr = IMediaControl_Run(control);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Run() failed: %x\n", hr);
+    hr = IMediaControl_GetState(control, INFINITE, &state);
+    ok(SUCCEEDED(hr), "GetState() failed: %x\n", hr);
+    ok(state == State_Running, "wrong state %d\n", state);
 
     hr = IMediaControl_Stop(control);
-    ok(hr == S_OK, "Got hr %#x.\n", hr);
+    ok(SUCCEEDED(hr), "Stop() failed: %x\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "GetState() failed: %x\n", hr);
+    ok(state == State_Stopped, "wrong state %d\n", state);
+
+    hr = IMediaControl_Pause(control);
+    ok(SUCCEEDED(hr), "Pause() failed: %x\n", hr);
+    hr = IMediaControl_GetState(control, 1000, &state);
+    ok(hr == S_OK, "GetState() failed: %x\n", hr);
+    ok(state == State_Paused, "wrong state %d\n", state);
 }
 
 static void test_mpeg_audio_decoder(void)

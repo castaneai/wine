@@ -36,6 +36,77 @@ struct mpeg_splitter_source
     SourceSeeking seek;
 };
 
+#pragma region IMediaSeeking
+
+static HRESULT WINAPI ChangeCurrent(IMediaSeeking *iface)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI ChangeStop(IMediaSeeking *iface)
+{
+    return S_OK;
+}
+
+static HRESULT WINAPI ChangeRate(IMediaSeeking *iface)
+{
+    return S_OK;
+}
+
+static inline struct mpeg_splitter_source *impl_from_IMediaSeeking(IMediaSeeking *iface)
+{
+    return CONTAINING_RECORD(iface, struct mpeg_splitter_source, seek.IMediaSeeking_iface);
+}
+
+static HRESULT WINAPI Seeking_QueryInterface(IMediaSeeking *iface, REFIID riid, void **ppv)
+{
+    struct mpeg_splitter_source *This = impl_from_IMediaSeeking(iface);
+    return IPin_QueryInterface(&This->pin.pin.IPin_iface, riid, ppv);
+}
+
+static ULONG WINAPI Seeking_AddRef(IMediaSeeking *iface)
+{
+    struct mpeg_splitter_source *This = impl_from_IMediaSeeking(iface);
+    return IPin_AddRef(&This->pin.pin.IPin_iface);
+}
+
+static ULONG WINAPI Seeking_Release(IMediaSeeking *iface)
+{
+    struct mpeg_splitter_source *This = impl_from_IMediaSeeking(iface);
+    return IPin_Release(&This->pin.pin.IPin_iface);
+}
+
+static HRESULT WINAPI Seeking_SetPositions(IMediaSeeking *iface, LONGLONG *current, DWORD current_flags, LONGLONG *stop, DWORD stop_flags)
+{
+    return S_OK;
+}
+
+static const IMediaSeekingVtbl Seeking_Vtbl =
+{
+    Seeking_QueryInterface,
+    Seeking_AddRef,
+    Seeking_Release,
+    SourceSeekingImpl_GetCapabilities,
+    SourceSeekingImpl_CheckCapabilities,
+    SourceSeekingImpl_IsFormatSupported,
+    SourceSeekingImpl_QueryPreferredFormat,
+    SourceSeekingImpl_GetTimeFormat,
+    SourceSeekingImpl_IsUsingTimeFormat,
+    SourceSeekingImpl_SetTimeFormat,
+    SourceSeekingImpl_GetDuration,
+    SourceSeekingImpl_GetStopPosition,
+    SourceSeekingImpl_GetCurrentPosition,
+    SourceSeekingImpl_ConvertTimeFormat,
+    Seeking_SetPositions,
+    SourceSeekingImpl_GetPositions,
+    SourceSeekingImpl_GetAvailable,
+    SourceSeekingImpl_SetRate,
+    SourceSeekingImpl_GetRate,
+    SourceSeekingImpl_GetPreroll
+};
+
+#pragma endregion
+
 struct mpeg_splitter
 {
     struct strmbase_filter filter;
@@ -47,6 +118,63 @@ struct mpeg_splitter
     struct mpeg_splitter_source **sources;
     unsigned int source_count;
 };
+
+#pragma region IAMStreamSelect
+
+static struct mpeg_splitter *impl_from_IAMStreamSelect(IAMStreamSelect *iface)
+{
+    return CONTAINING_RECORD(iface, struct mpeg_splitter, IAMStreamSelect_iface);
+}
+
+static HRESULT WINAPI stream_select_QueryInterface(IAMStreamSelect *iface, REFIID iid, void **out)
+{
+    struct mpeg_splitter *filter = impl_from_IAMStreamSelect(iface);
+    return IUnknown_QueryInterface(filter->filter.outer_unk, iid, out);
+}
+
+static ULONG WINAPI stream_select_AddRef(IAMStreamSelect *iface)
+{
+    struct mpeg_splitter *filter = impl_from_IAMStreamSelect(iface);
+    return IUnknown_AddRef(filter->filter.outer_unk);
+}
+
+static ULONG WINAPI stream_select_Release(IAMStreamSelect *iface)
+{
+    struct mpeg_splitter *filter = impl_from_IAMStreamSelect(iface);
+    return IUnknown_Release(filter->filter.outer_unk);
+}
+
+static HRESULT WINAPI stream_select_Count(IAMStreamSelect *iface, DWORD *count)
+{
+    FIXME("iface %p, count %p, stub!\n", iface, count);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI stream_select_Info(IAMStreamSelect *iface, LONG index,
+        AM_MEDIA_TYPE **mt, DWORD *flags, LCID *lcid, DWORD *group, WCHAR **name, IUnknown **object, IUnknown **unknown)
+{
+    FIXME("iface %p, index %ld, mt %p, flags %p, lcid %p, group %p, name %p, object %p, unknown %p, stub!\n",
+    iface, index, mt, flags, lcid, group, name, object, unknown);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI stream_select_Enable(IAMStreamSelect *iface, LONG index, DWORD flags)
+{
+    FIXME("iface %p, index %ld, flags %#lx, stub!\n", iface, index, flags);
+    return E_NOTIMPL;
+}
+
+static const IAMStreamSelectVtbl stream_select_vtbl =
+{
+    stream_select_QueryInterface,
+    stream_select_AddRef,
+    stream_select_Release,
+    stream_select_Count,
+    stream_select_Info,
+    stream_select_Enable,
+};
+
+#pragma endregion
 
 #pragma region filter
 
@@ -299,8 +427,8 @@ static struct mpeg_splitter_source *create_output_pin(struct mpeg_splitter *filt
 
     pin->is_video = is_video;
     strmbase_source_init(&pin->pin, &filter->filter, name, &mpeg_splitter_source_ops);
-
-    TRACE("------------------ create output pin: %s\n", name);
+    if (strmbase_seeking_init(&pin->seek, &Seeking_Vtbl, ChangeStop, ChangeCurrent, ChangeRate) != S_OK)
+        return E_OUTOFMEMORY;
 
     filter->sources[filter->source_count++] = pin;
     return pin;
@@ -313,6 +441,19 @@ static struct mpeg_splitter_source *create_output_pin(struct mpeg_splitter *filt
 static inline struct mpeg_splitter *impl_from_strmbase_sink(struct strmbase_sink *iface)
 {
     return CONTAINING_RECORD(iface, struct mpeg_splitter, sink);
+}
+
+static HRESULT mpeg_splitter_sink_query_interface(struct strmbase_pin *iface, REFIID iid, void **out)
+{
+    struct mpeg_splitter *filter = impl_from_strmbase_sink(iface);
+
+    if (IsEqualGUID(iid, &IID_IMemInputPin))
+        *out = &filter->sink.IMemInputPin_iface;
+    else
+        return E_NOINTERFACE;
+
+    IUnknown_AddRef((IUnknown * ) * out);
+    return S_OK;
 }
 
 static HRESULT mpeg_splitter_sink_query_accept(struct strmbase_pin *iface, const AM_MEDIA_TYPE *mt)
@@ -356,11 +497,19 @@ static void mpeg_splitter_sink_disconnect(struct strmbase_sink *iface)
 {
 }
 
+static HRESULT WINAPI mpeg_splitter_sink_Receive(struct strmbase_sink *iface, IMediaSample *pSample)
+{
+    TRACE("------------ sink_RECEIVE-----\n");
+    return S_OK;
+}
+
 static const struct strmbase_sink_ops mpeg_splitter_sink_ops =
 {
+    .base.pin_query_interface = mpeg_splitter_sink_query_interface,
     .base.pin_query_accept = mpeg_splitter_sink_query_accept,
     .sink_connect = mpeg_splitter_sink_connect,
     .sink_disconnect = mpeg_splitter_sink_disconnect,
+    .pfnReceive =  mpeg_splitter_sink_Receive,
 };
 
 #pragma endregion
