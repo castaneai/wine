@@ -11,6 +11,7 @@ C_SRCS = \
 	main.c \
 	media_source.c \
 	mfplat.c \
+	mpeg_splitter.c \
 	quartz_parser.c \
 	wg_format.c \
 	wg_parser.c \
@@ -18,7 +19,8 @@ C_SRCS = \
 	wm_asyncreader.c \
 	wm_reader.c \
 	wm_syncreader.c \
-	wma_decoder.c
+	wma_decoder.c \
+	empty_decoder.c
 
 IDL_SRCS = \
 	winegstreamer_classes.idl

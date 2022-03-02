@@ -349,6 +349,8 @@ static const IClassFactoryVtbl class_factory_vtbl =
 static struct class_factory avi_splitter_cf = {{&class_factory_vtbl}, avi_splitter_create};
 static struct class_factory decodebin_parser_cf = {{&class_factory_vtbl}, decodebin_parser_create};
 static struct class_factory mpeg_splitter_cf = {{&class_factory_vtbl}, mpeg_splitter_create};
+static struct class_factory mpeg_video_decoder_cf = {{&class_factory_vtbl}, mpeg_video_decoder_create};
+static struct class_factory mpeg_audio_decoder_cf = {{&class_factory_vtbl}, mpeg_audio_decoder_create};
 static struct class_factory wave_parser_cf = {{&class_factory_vtbl}, wave_parser_create};
 static struct class_factory wma_decoder_cf = {{&class_factory_vtbl}, wma_decoder_create};
 
@@ -371,6 +373,10 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
         factory = &decodebin_parser_cf;
     else if (IsEqualGUID(clsid, &CLSID_MPEG1Splitter))
         factory = &mpeg_splitter_cf;
+    else if (IsEqualGUID(clsid, &CLSID_CMpegVideoCodec))
+        factory = &mpeg_video_decoder_cf;
+    else if (IsEqualGUID(clsid, &CLSID_CMpegAudioCodec))
+        factory = &mpeg_audio_decoder_cf;
     else if (IsEqualGUID(clsid, &CLSID_WAVEParser))
         factory = &wave_parser_cf;
     else if (IsEqualGUID(clsid, &CLSID_WMADecMediaObject))
@@ -534,6 +540,61 @@ static const REGFILTER2 reg_decodebin_parser =
     .u.s2.rgPins2 = reg_decodebin_parser_pins,
 };
 
+static const REGPINTYPES reg_mpeg_video_decoder_mts[2] =
+{
+        {&MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1Packet},
+        {&MEDIATYPE_Video, &MEDIASUBTYPE_MPEG1AudioPayload},
+};
+
+static const REGFILTERPINS2 reg_mpeg_video_decoder_pins[2] =
+{
+    {
+            .nMediaTypes = 2,
+            .lpMediaType = reg_mpeg_video_decoder_mts,
+    },
+    {
+            .dwFlags = REG_PINFLAG_B_OUTPUT,
+            .nMediaTypes = 1,
+            .lpMediaType = &reg_video_mt,
+    },
+};
+
+static const REGFILTER2 reg_mpeg_video_decoder =
+{
+        .dwVersion = 2,
+        .dwMerit = MERIT_NORMAL,
+        .u.s2.cPins2 = 2,
+        .u.s2.rgPins2 = reg_mpeg_video_decoder_pins,
+};
+
+static const REGPINTYPES reg_mpeg_audio_decoder_mts[2] =
+{
+        {&MEDIATYPE_Audio, &MEDIASUBTYPE_MPEG1Packet},
+        {&MEDIATYPE_Audio, &MEDIASUBTYPE_MPEG1AudioPayload},
+};
+
+static const REGFILTERPINS2 reg_mpeg_audio_decoder_pins[2] =
+{
+    {
+            .nMediaTypes = 2,
+            .lpMediaType = reg_mpeg_audio_decoder_mts,
+    },
+    {
+            .dwFlags = REG_PINFLAG_B_OUTPUT,
+            .nMediaTypes = 1,
+            .lpMediaType = &reg_audio_mt,
+    },
+};
+
+static const REGFILTER2 reg_mpeg_audio_decoder =
+{
+        .dwVersion = 2,
+        .dwMerit = MERIT_NORMAL,
+        .u.s2.cPins2 = 2,
+        .u.s2.rgPins2 = reg_mpeg_audio_decoder_pins,
+};
+
+
 HRESULT WINAPI DllRegisterServer(void)
 {
     DMO_PARTIAL_MEDIATYPE wma_decoder_output[2] =
@@ -566,6 +627,10 @@ HRESULT WINAPI DllRegisterServer(void)
             L"GStreamer splitter filter", NULL, NULL, NULL, &reg_decodebin_parser);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_MPEG1Splitter,
             L"MPEG-I Stream Splitter", NULL, NULL, NULL, &reg_mpeg_splitter);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_CMpegVideoCodec,
+            L"MPEG Video Decoder", NULL, NULL, NULL, &reg_mpeg_video_decoder);
+    IFilterMapper2_RegisterFilter(mapper, &CLSID_CMpegAudioCodec,
+            L"MPEG Audio Decoder", NULL, NULL, NULL, &reg_mpeg_audio_decoder);
     IFilterMapper2_RegisterFilter(mapper, &CLSID_WAVEParser, L"Wave Parser", NULL, NULL, NULL, &reg_wave_parser);
 
     IFilterMapper2_Release(mapper);
@@ -594,6 +659,8 @@ HRESULT WINAPI DllUnregisterServer(void)
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_AviSplitter);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_decodebin_parser);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_MPEG1Splitter);
+    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_CMpegVideoCodec);
+    IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_CMpegAudioCodec);
     IFilterMapper2_UnregisterFilter(mapper, NULL, NULL, &CLSID_WAVEParser);
 
     IFilterMapper2_Release(mapper);
